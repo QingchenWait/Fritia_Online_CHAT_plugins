@@ -3,8 +3,6 @@ import Icon from "./Icon.jsx";
 import logo from "../../logo.png";
 import introduction from "./intro.md?raw";
 import guide from "./guide.md?raw";
-import { useCreatorAuth } from "./auth.jsx";
-import SubmissionForm from "./SubmissionForm.jsx";
 import { CARD_LABELS, ISSUES_URL, LOGIN_URL, SITE_URL, SUBMISSION_URL, fetchCharacterCards, filterAndSortCards } from "./github.mjs";
 
 const DocumentPanel = React.lazy(() => import("./MarkdownDocument.jsx"));
@@ -19,7 +17,6 @@ const SECTIONS = [
 function currentSection() {
   const hash = window.location.hash.slice(1);
   if (SECTIONS.some((section) => section.id === hash)) return hash;
-  if (new URLSearchParams(window.location.search).get("view") === "submit") return "submit";
   return "intro";
 }
 
@@ -31,7 +28,6 @@ function hasRememberedDisclaimer() {
 }
 
 export default function CreatorApp() {
-  const auth = useCreatorAuth();
   const [active, setActive] = React.useState(currentSection);
   const [scrolled, setScrolled] = React.useState(false);
   const [disclaimerDismissed, setDisclaimerDismissed] = React.useState(hasRememberedDisclaimer);
@@ -108,7 +104,7 @@ export default function CreatorApp() {
             <a className="creator-button creator-header-button creator-home" href={SITE_URL}>
               <Icon name="arrow-left" /><span>APP 官网首页</span>
             </a>
-            {auth.configured ? <button className="creator-button creator-header-button creator-login" type="button" onClick={auth.user ? auth.signOut : auth.signIn} disabled={auth.loading} title={auth.user ? `@${auth.user.login} · 退出当前登录` : "使用 GitHub 授权登录社区"}><Icon name={auth.user ? "log-out" : "github"} /><span>{auth.loading ? "正在验证…" : auth.user ? "退出登录" : "使用 GitHub 登录"}</span></button> : <a className="creator-button creator-header-button creator-login" href={LOGIN_URL} target="_blank" rel="noopener noreferrer" title="在 GitHub 登录后进入角色卡投稿模板"><Icon name="github" /><span>使用 GitHub 登录</span><Icon name="arrow-up-right" className="login-arrow" /></a>}
+            <a className="creator-button creator-header-button creator-login" href={LOGIN_URL} target="_blank" rel="noopener noreferrer" title="在 GitHub 登录后进入角色卡投稿模板"><Icon name="github" /><span>使用 GitHub 登录</span><Icon name="arrow-up-right" className="login-arrow" /></a>
           </div>
         </div>
       </header>
@@ -332,7 +328,6 @@ function EmptyState({ icon, title, description, children }) {
 }
 
 function SubmissionPanel() {
-  const auth = useCreatorAuth();
   const attachments = [
     { icon: "image", title: "角色头像", formats: "PNG · JPG · JPEG · WEBP", description: "准备一张静态图片，作为她的第一张名片。", tone: "pink" },
     { icon: "file-text", title: "人格提示词", formats: "TXT · 1000 字以上", description: "写下角色身份、性格、发言风格与示例对话。", tone: "blue" },
@@ -341,7 +336,6 @@ function SubmissionPanel() {
   return (
     <section className="creator-submission">
       <div className="creator-panel-heading"><div><h2>角色卡投稿</h2><p>与你笔下的她们，共同走向下一个明天。</p></div><span className="creator-section-mark"><Icon name="send" /></span></div>
-      {auth.configured ? <SubmissionForm /> : <>
       <div className="creator-submit-invitation">
         <span className="creator-submit-symbol"><Icon name="heart" /></span>
         <h3>每一个角色，都有值得分享的故事</h3>
@@ -355,7 +349,6 @@ function SubmissionPanel() {
         <div className="creator-attachment-grid">{attachments.map((item) => <div className={`creator-attachment creator-tone-${item.tone}`} key={item.title}><span className="creator-attachment-icon"><Icon name={item.icon} /></span><h4>{item.title} <span className="creator-required">*</span></h4><p>{item.description}</p><span className="creator-format">{item.formats}</span></div>)}</div>
         <div className="creator-declarations"><Icon name="circle-check" /><div><strong>必要上传声明 <span className="creator-required">*</span></strong><p>请阅读共创要求，并在 GitHub 表单中勾选全部三项必要声明。两项可选授权可按自己的意愿选择。</p></div></div>
       </div>
-      </>}
       <div className="creator-submit-footer"><a className="creator-text-link" href="#intro"><Icon name="book-open-text" />先阅读共创计划介绍<Icon name="arrow-up-right" /></a><a className="creator-text-link" href={`${ISSUES_URL}/1`} target="_blank" rel="noopener noreferrer"><Icon name="external-link" />参考已有投稿<Icon name="arrow-up-right" /></a></div>
     </section>
   );

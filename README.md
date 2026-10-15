@@ -1,49 +1,39 @@
-# 海姆休息室共创计划
+# 海姆休息室 | 共创计划
+我们诚邀 [海姆休息室](https://fritia.online/chatroom/) 的所有用户，参与到角色卡的共建生态中，共同书写与她们的故事 ~
 
-独立 React / Vite 静态站点，主页即共创计划。目标仓库为 [QingchenWait/Fritia_Online_CHAT_plugins](https://github.com/QingchenWait/Fritia_Online_CHAT_plugins)，GitHub Pages 默认网址为 **https://qingchenwait.github.io/Fritia_Online_CHAT_plugins/**。原 Cloudflare 项目未修改。
+我们在本仓库的 [issue 页面](https://github.com/QingchenWait/Fritia_Online_CHAT_plugins) 中，建立了社区角色卡共享站点。任何人都可以进行第三方角色卡的 浏览/下载/分享，高质量的角色卡还有机会入选精选列表！
 
-## 启动与部署
+**投稿角色卡**：[点击这里](https://github.com/QingchenWait/Fritia_Online_CHAT_plugins/issues/new?template=character-card.yml)
 
-建议使用 Node.js 24。
+### ❗️ 共创计划基本原则
+社区角色卡由创作者负全部责任。如果您希望将自建角色卡分享到 GitHub 平台，请务必遵守以下原则，并在上传前自行检查：
 
-```bash
-npm ci
-npm test
-npm run dev
-```
+1. 角色卡必须是以分析员（用户）为核心的纯爱/后宫导向，**禁止包含** NTR/百合/猎奇XP 等与社区调性不符的内容。
+2. 上传角色卡时，必须保证所有内容均**不包含**暴力/恐怖/摄政/生理不适/版权争议/引战带节奏等违法违规内容。
 
-生产构建为 `npm run build`，产物在 `dist/`。相对资源和分类锚点兼容 GitHub Pages 仓库子目录。
+违反上述原则的角色卡不会上架，并进行 (包括但不限于) 建议修改、删除投稿、冻结创作者投稿权限等处理。
 
-将本项目文件合并到目标仓库根目录（保留该仓库其他已有文件），在 **Settings → Pages → Source** 选择 **GitHub Actions**。推送到 `main` 或手动运行 [pages.yml](.github/workflows/pages.yml) 即构建、测试并部署。本轮仅准备本地项目，没有推送、创建 Supabase 项目或发布网站。
 
-## 站内投稿
+### 🔔 分享角色卡的准备
 
-已经实现 **Supabase Auth + Supabase Storage + GitHub API** 的可配置方案。网站仍部署在 Pages，无需自建服务器；第三方托管认证和附件存储。
+在分享角色卡前，请登录 GitHub 账号，并准备好以下文件：
 
-1. Supabase 代办 GitHub OAuth。网页用返回的 provider token 调用 `/user` 核实投稿者真实身份，并与 Supabase 的 GitHub identity 比对。
-2. 登录验证成功后显示表单，头像、TXT 提示词及 MP3/WAV 保存到 Supabase 公开附件桶，按用户 UUID 分隔。
-3. 网页使用投稿者的 GitHub 令牌创建 Issue，作者是投稿者本人，正文与 `character-card.yml` 字段标题一致。
-4. 普通投稿者无权直接添加标签时，由仓库内的 [label-character-cards.yml](.github/workflows/label-character-cards.yml) 工作流补上 `角色卡`，不会自动添加审核通过或精选标签。
+- **角色卡介绍**：30 字以内的简短介绍。
+- **头像**: 用于角色的头像，可使用表情包等静态图片。
+- **人格提示词**：(TXT 格式) 1000 字以上的纯文本提示词。建议至少包含：角色身份介绍、简单背景故事、核心性格、细节人物设定、发言风格、恋人互动的情感基调、示例对话等。
+- **参考语音**：(MP3/WAV 格式) 用于语音对话时的参考，建议 5-30s、无背景音乐、声音清晰干净。(不需要输入语音对应的台词文本)
 
-**开通步骤见 [SUPABASE_SETUP.md](SUPABASE_SETUP.md)**，访问规则在 [supabase/setup.sql](supabase/setup.sql)。Pages 构建通过 repository variables 读取公开配置。不得向前端填入 service_role/secret key、GitHub client secret、PAT 或 App 私钥。
+### 🔔 分享角色卡流程
+1. 进入 [角色卡投稿](https://github.com/QingchenWait/Fritia_Online_CHAT_plugins/issues/new?template=character-card.yml) 页面。
+2. 按照指引上传所有内必填内容。您可以自主选择是否授权青尘工作室将您的角色卡合并到官方内置角色，或用于宣发。
+3. 填写全部内容后，点击 `Create` 按钮提交，即可完成分享。
+4. 青尘工作室将对内容进行简单审核，以检查是否含有违反共创计划基本原则的内容。初审通过即可上架供所有人下载。
 
-尚未创建真实 Supabase 项目，因此真实 OAuth、Storage RLS 和云端 Issue 写入尚待开通后联调。本地测试使用模拟服务验证身份拒绝、上传顺序、表单校验、正文格式及失败处理，不会创建真实 Issue。未配置时保留可用的 [character-card.yml 原生入口](https://github.com/QingchenWait/Fritia_Online_CHAT_plugins/issues/new?template=character-card.yml)，完整配置后自动启用站内表单。
 
-## 浏览与免责声明
 
-- 默认显示介绍，右侧强调色“浏览角色卡”进入总览。
-- 总览读取 open 且有 `初审通过` 标签的 Issue，精选读取 open 且有 `精选角色卡` 标签的 Issue。包含搜索、排序、分页、刷新和环形加载动画。
-- Issue 请求使用 `cache: no-store`，列表不写入浏览器存储。
-- 进入总览或精选后立即开始读取，同时只模糊角色卡区域并展示免责声明；“我已知悉”解除遮罩，“不再提醒”单独保存在 localStorage。
-- Markdown 支持 GFM、HTML、公式、表格、代码高亮及本地图片；HTML 仅用于受信任本地文档，不直接渲染用户 Issue 的 HTML。
+### 🔔 使用角色卡
+- 海姆休息室 APP v1.2.0 之后的版本，在 `插件商店` 中添加了 `社区角色卡` 栏目，支持一键下载上架的角色卡。
+- 角色卡也支持通过 `导入角色` 功能进行手动导入。
 
-## 检索结论与来源
-
-组合托管服务可以满足站内投稿，因此本站没有把跳转 GitHub 固定为唯一方案。迁移到 Pages 本身不会改变浏览器对 `github.com` 登录状态和令牌端点的访问限制，托管 OAuth 负责解决这一部分。
-
-- [Supabase GitHub 登录](https://supabase.com/docs/guides/auth/social-login/auth-github)：OAuth、额外 scope、provider token。
-- [浏览器上传](https://supabase.com/docs/guides/storage/uploads/standard-uploads)、[Storage RLS](https://supabase.com/docs/guides/storage/security/access-control)：公开文件、认证上传和用户目录规则。
-- [GitHub API CORS](https://docs.github.com/en/rest/using-the-rest-api/using-cors-and-jsonp-to-make-cross-origin-requests)、[创建 Issue](https://docs.github.com/en/rest/issues/issues#create-an-issue)：授权写入及标签权限。
-- [BugDrop 源码](https://github.com/bugdrophq/bugdrop)：有网页到 Issue 的托管路径，但使用 App 身份建单，不保留投稿者归属，未采用。
-
-视觉参考 [AstrBot 市场页](https://cloud.astrbot.app/market) HTML 和公开 CSS 的约 210px 侧栏、双列卡片及搜索分页布局，使用独立 React 实现。新按钮图标下载自 [Lucide](https://github.com/lucide-icons/lucide)，许可在 `src/chatroom/creator/icons/LICENSE`；GitHub 标识为 Simple Icons 的 CC0 素材。
+### 🔔 问题反馈
+如果您在流程中遇到任何问题，或对已上架的角色卡存在异议，欢迎联系 [@CyanDust_青尘](https://space.bilibili.com/385556208) 进行意见反馈。
