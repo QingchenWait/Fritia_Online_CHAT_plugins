@@ -68,6 +68,7 @@ body:
       placeholder: "请将参考音频文件拖拽至此处，或点击下方的 Paste, drop, or click to add files 上传按钮，并选择音频文件。"
     validations:
       required: true
+      accept: ".mp3,.wav"
 
   - type: checkboxes
     id: required-declarations
