@@ -1,0 +1,420 @@
+name: Protect Approved Issue Content
+
+on:
+  issues:
+    types: [labeled, unlabeled, edited]
+
+  # 可选：用于为已经打上「初审通过」标签的旧 Issue 初始化审核快照
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "需要初始化审核快照的 Issue 编号"
+        required: true
+        type: number
+
+permissions:
+  issues: write
+
+# 同一个 Issue 的标签变更和正文编辑按队列依次处理，避免快照状态竞争。
+# queue: max 最多允许 100 个待处理运行。
+concurrency:
+  group: approved-issue-${{ github.event.issue.number || github.event.inputs.issue_number || 'manual' }}
+  queue: max
+
+jobs:
+  protect-approved-issue:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Protect approved issue title and body
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const LABEL = '初审通过';
+            const MARKER = '<!-- APPROVED_ISSUE_LOCK:v1:';
+            const MARKER_REGEX = /<!-- APPROVED_ISSUE_LOCK:v1:([A-Za-z0-9+/=]+) -->/;
+            const zlib = require('zlib');
+
+            const issueNumber = Number(
+              context.payload.issue?.number ??
+              context.payload.inputs?.issue_number
+            );
+
+            if (!Number.isSafeInteger(issueNumber) || issueNumber < 1) {
+              throw new Error('Invalid issue number.');
+            }
+
+            const action = context.payload.action;
+            const eventLabel = context.payload.label?.name;
+            const actor = (
+              context.payload.sender?.login ||
+              context.actor ||
+              ''
+            ).toLowerCase();
+
+            // 必须与 protect-issue-labels.yml 中的授权名单保持一致。
+            const authorizedUsers = new Set([
+              context.repo.owner.toLowerCase(),
+              'ADMIN_USERNAME_1',
+              'ADMIN_USERNAME_2'
+            ].map(name => name.toLowerCase()));
+
+            const isAuthorized = login =>
+              authorizedUsers.has((login || '').toLowerCase());
+
+            const isApproved = issue =>
+              (issue.labels || []).some(label => label.name === LABEL);
+
+            async function getIssue() {
+              const { data } = await github.rest.issues.get({
+                ...context.repo,
+                issue_number: issueNumber
+              });
+              return data;
+            }
+
+            async function getSnapshotComment() {
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                {
+                  ...context.repo,
+                  issue_number: issueNumber,
+                  per_page: 100
+                }
+              );
+
+              const matches = comments
+                .filter(comment =>
+                  comment.user?.login === 'github-actions[bot]' &&
+                  MARKER_REGEX.test(comment.body || '')
+                )
+                .sort((a, b) =>
+                  new Date(b.updated_at) - new Date(a.updated_at)
+                );
+
+              return matches[0] || null;
+            }
+
+            function encodeSnapshot(snapshot) {
+              const compressed = zlib.deflateRawSync(
+                Buffer.from(JSON.stringify({
+                  version: 1,
+                  title: snapshot.title,
+                  body: snapshot.body,
+                  active: snapshot.active
+                }), 'utf8')
+              ).toString('base64');
+
+              return `${MARKER}${compressed} -->`;
+            }
+
+            function decodeSnapshot(commentBody) {
+              const match = (commentBody || '').match(MARKER_REGEX);
+              if (!match) {
+                throw new Error('Snapshot marker is missing.');
+              }
+
+              const json = zlib.inflateRawSync(
+                Buffer.from(match[1], 'base64')
+              ).toString('utf8');
+
+              const snapshot = JSON.parse(json);
+
+              if (
+                snapshot.version !== 1 ||
+                typeof snapshot.title !== 'string' ||
+                !(snapshot.body === null || typeof snapshot.body === 'string') ||
+                typeof snapshot.active !== 'boolean'
+              ) {
+                throw new Error('Snapshot data is invalid.');
+              }
+
+              return snapshot;
+            }
+
+            async function saveSnapshot(title, body, active) {
+              const existing = await getSnapshotComment();
+
+              const status = active
+                ? '🔒 **初审通过：角色卡内容已锁定**'
+                : '🔓 **角色卡内容锁定已解除**';
+
+              const explanation = active
+                ? '该 Issue 的标题和正文已保存为审核版本。锁定期间仍允许所有人继续发表评论和讨论。只有授权管理员移除「初审通过」标签，才能解除锁定。'
+                : '授权管理员已移除「初审通过」标签，标题和正文现已恢复可编辑状态。重新添加该标签时，将保存新的审核版本。';
+
+              const bodyText = [
+                status,
+                '',
+                explanation,
+                '',
+                encodeSnapshot({ title, body, active })
+              ].join('\n');
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  ...context.repo,
+                  comment_id: existing.id,
+                  body: bodyText
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  ...context.repo,
+                  issue_number: issueNumber,
+                  body: bodyText
+                });
+              }
+            }
+
+            // 以时间线中最近一次由授权管理员执行的标签操作作为锁定状态依据。
+            // 这样，非管理员添加/移除标签以及旧工作流的机器人回滚，不会改变审核状态。
+            async function getLatestAuthorizedLabelEvent() {
+              const events = await github.paginate(
+                github.rest.issues.listEventsForTimeline,
+                {
+                  ...context.repo,
+                  issue_number: issueNumber,
+                  per_page: 100
+                }
+              );
+
+              return events
+                .filter(event =>
+                  ['labeled', 'unlabeled'].includes(event.event) &&
+                  event.label?.name === LABEL &&
+                  isAuthorized(event.actor?.login)
+                )
+                .sort((a, b) =>
+                  new Date(b.created_at) - new Date(a.created_at)
+                )[0] || null;
+            }
+
+            async function isLockActive() {
+              const latestEvent = await getLatestAuthorizedLabelEvent();
+              return latestEvent?.event === 'labeled';
+            }
+
+            // 不处理 Pull Request。
+            if (context.payload.issue?.pull_request) {
+              core.info('Pull requests are not handled by this workflow.');
+              return;
+            }
+
+            // ---------------------------------------------------------
+            // A. 手动初始化旧 Issue 的审核快照
+            // ---------------------------------------------------------
+            if (context.eventName === 'workflow_dispatch') {
+              if (!isAuthorized(actor)) {
+                core.setFailed('Only authorized administrators can initialize a snapshot.');
+                return;
+              }
+
+              const issue = await getIssue();
+              if (!isApproved(issue) || !(await isLockActive())) {
+                core.setFailed(
+                  `Issue #${issueNumber} does not have an active administrator-applied "${LABEL}" label.`
+                );
+                return;
+              }
+
+              await saveSnapshot(issue.title, issue.body, true);
+              core.notice(`Initialized the approved snapshot for issue #${issueNumber}.`);
+              return;
+            }
+
+            // ---------------------------------------------------------
+            // B. 管理员添加「初审通过」：保存标题和正文快照
+            // ---------------------------------------------------------
+            if (action === 'labeled' && eventLabel === LABEL) {
+              if (!isAuthorized(actor)) {
+                core.info(`Ignoring unauthorized label addition by ${actor}.`);
+                return;
+              }
+
+              // 如果之后已经发生管理员移除标签，则不再处理这个过期的 labeled 事件。
+              if (!(await isLockActive())) {
+                core.info('A later administrator action has already removed the approval label.');
+                return;
+              }
+
+              const issue = await getIssue();
+              if (!isApproved(issue)) {
+                // 管理员已添加标签但随后被非管理员移除：仅在锁定仍有效时恢复标签。
+                if (!(await isLockActive())) {
+                  core.info('A later administrator action has unlocked the issue; do not restore the label.');
+                  return;
+                }
+
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: issueNumber,
+                  labels: [LABEL]
+                });
+              }
+
+              // 使用 labeled 事件中的 Issue 内容，保存打标签时的版本。
+              const eventIssue = context.payload.issue;
+              await saveSnapshot(eventIssue.title, eventIssue.body, true);
+
+              core.notice(`Approved content snapshot saved for issue #${issueNumber}.`);
+              return;
+            }
+
+            // ---------------------------------------------------------
+            // C. 移除「初审通过」：
+            //    管理员解除锁定；非管理员移除则自动恢复标签
+            // ---------------------------------------------------------
+            if (action === 'unlabeled' && eventLabel === LABEL) {
+              const lockActive = await isLockActive();
+              const comment = await getSnapshotComment();
+
+              if (!lockActive) {
+                if (comment) {
+                  const snapshot = decodeSnapshot(comment.body);
+                  if (snapshot.active) {
+                    await saveSnapshot(snapshot.title, snapshot.body, false);
+                  }
+                }
+
+                // 若管理员已解锁，但期间有人重新添加了标签，则清除该非授权标签。
+                const currentIssue = await getIssue();
+                if (isApproved(currentIssue)) {
+                  await github.rest.issues.removeLabel({
+                    ...context.repo,
+                    issue_number: issueNumber,
+                    name: LABEL
+                  });
+                }
+
+                core.info('The latest authorized action has unlocked this issue.');
+                return;
+              }
+
+              // 最近一次管理员操作仍然是添加标签，说明本次移除来自非管理员。
+              const issue = await getIssue();
+
+              if (!isApproved(issue)) {
+                await github.rest.issues.addLabels({
+                  ...context.repo,
+                  issue_number: issueNumber,
+                  labels: [LABEL]
+                });
+
+                core.warning(
+                  `Restored "${LABEL}" because ${actor} is not authorized to unlock this issue.`
+                );
+              }
+
+              return;
+            }
+
+            // ---------------------------------------------------------
+            // D. 编辑 Issue：恢复已审核的标题和正文
+            // ---------------------------------------------------------
+            if (action !== 'edited') {
+              return;
+            }
+
+            if (!(await isLockActive())) {
+              core.info('No active administrator-approved lock; edit is allowed.');
+              return;
+            }
+
+            let issue = await getIssue();
+            let comment = await getSnapshotComment();
+
+            // 兼容工作流启用前就已经打上「初审通过」的旧 Issue：
+            // 没有快照时，使用本次编辑事件中的旧值初始化审核版本。
+            // 同时兼容标签刚刚重新添加、快照评论尚未更新的情况。
+            let snapshot = comment ? decodeSnapshot(comment.body) : null;
+
+            if (!snapshot || !snapshot.active) {
+              const changes = context.payload.changes || {};
+              const eventIssue = context.payload.issue || issue;
+
+              const previousTitle =
+                Object.prototype.hasOwnProperty.call(changes, 'title')
+                  ? changes.title.from
+                  : eventIssue.title;
+
+              const previousBody =
+                Object.prototype.hasOwnProperty.call(changes, 'body')
+                  ? changes.body.from
+                  : eventIssue.body;
+
+              await saveSnapshot(previousTitle, previousBody, true);
+              comment = await getSnapshotComment();
+              snapshot = decodeSnapshot(comment.body);
+
+              core.info('Initialized or refreshed the approved snapshot from the pre-edit issue version.');
+            }
+
+            // 如果标签被非管理员移除，锁定仍然有效，恢复标签。
+            if (!isApproved(issue)) {
+              // 再确认一次锁定状态，避免在管理员刚解除锁定后重新添加标签。
+              if (!(await isLockActive())) {
+                await saveSnapshot(snapshot.title, snapshot.body, false);
+                core.info('An authorized administrator unlocked the issue; edit was left unchanged.');
+                return;
+              }
+
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: issueNumber,
+                labels: [LABEL]
+              });
+            }
+
+            // 最后再次检查管理员是否已经解除锁定，避免覆盖解锁后的编辑。
+            if (!(await isLockActive())) {
+              const currentIssue = await getIssue();
+              if (isApproved(currentIssue)) {
+                await github.rest.issues.removeLabel({
+                  ...context.repo,
+                  issue_number: issueNumber,
+                  name: LABEL
+                });
+              }
+
+              await saveSnapshot(snapshot.title, snapshot.body, false);
+              core.info('An authorized administrator unlocked the issue; edit was left unchanged.');
+              return;
+            }
+
+            const latestComment = await getSnapshotComment();
+            if (!latestComment) {
+              throw new Error('The approved snapshot comment is missing.');
+            }
+
+            const latestSnapshot = decodeSnapshot(latestComment.body);
+            if (!latestSnapshot.active) {
+              core.info('The approved snapshot is inactive; edit was left unchanged.');
+              return;
+            }
+
+            issue = await getIssue();
+
+            const update = {};
+
+            if (issue.title !== latestSnapshot.title) {
+              update.title = latestSnapshot.title;
+            }
+
+            if (issue.body !== latestSnapshot.body) {
+              update.body = latestSnapshot.body;
+            }
+
+            if (Object.keys(update).length === 0) {
+              core.info('Issue title and body already match the approved snapshot.');
+              return;
+            }
+
+            await github.rest.issues.update({
+              ...context.repo,
+              issue_number: issueNumber,
+              ...update
+            });
+
+            core.notice(
+              `Restored the approved title/body of issue #${issueNumber}.`
+            );
